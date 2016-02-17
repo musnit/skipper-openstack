@@ -1,17 +1,44 @@
-var pkgcloud = require("pkgcloud"),
+var pkgcloud = require("pkgcloud-bluemix-objectstorage"),
     Writable = require("stream").Writable,
     _ = require("underscore");
 
 function getClient(credentials) {
-  return pkgcloud.storage.createClient({
-       provider: 'openstack',
-       username: credentials.userId,
-       password: credentials.password,
-       authUrl: credentials.auth_url,
-       tenantId: credentials.projectId,
-       region: credentials.region,
-       version: "2"
-  });
+
+  var config = {
+    provider: "openstack",
+    authUrl: credentials.authUrl,
+    useServiceCatalog: true,
+    useInternal: false,
+    tenantId: credentials.projectId,
+    userId: credentials.userId,
+    username: credentials.username,
+    password: credentials.password,
+    region: credentials.region
+  };
+
+  config.auth = {
+    forceUri  : credentials.authUrl + '/v3/auth/tokens', //force uri to v3, usually you take the baseurl for authentication and add this to it /v3/auth/tokens (at least in bluemix)
+    interfaceName : "public", //use public for apps outside bluemix and internal for apps inside bluemix. There is also admin interface, I personally do not know, what it is for.
+    "identity": {
+        "methods": [
+            "password"
+        ],
+        "password": {
+            "user": {
+                "id": credentials.userId,
+                "password": credentials.password
+            }
+        }
+    },
+    "scope": {
+        "project": {
+            "id": credentials.projectId
+        }
+    }
+  };
+
+  // Create a pkgcloud storage client
+  return pkgcloud.storage.createClient(config);
 }
 
 module.exports = function SwiftStore(globalOpts) {
@@ -45,10 +72,9 @@ module.exports = function SwiftStore(globalOpts) {
 
             receiver._write = function onFile(__newFile, encoding, done) {
                 var client = getClient(options.credentials);
-                console.log("Uploading file with name", __newFile.filename);
                 __newFile.pipe(client.upload({
                     container: options.container,
-                    remote: __newFile.filename
+                    remote: __newFile.fd
                 }, function(err, value) {
                   console.log(err);
                   console.log(value);
@@ -61,7 +87,6 @@ module.exports = function SwiftStore(globalOpts) {
                 }));
 
                 __newFile.on("end", function(err, value) {
-                  console.log("finished uploading", __newFile.filename);
                     receiver.emit('finish', err, value );
                     done();
                 });
